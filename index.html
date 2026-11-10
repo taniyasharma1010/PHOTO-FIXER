@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Form Photo Fixer - GenAI Week 2</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Cropper.js CDN for visual image cropping -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+  <style>
+    /* Oval Face Guide overlay inside Cropper preview */
+    .cropper-crop-box::after {
+      content: "";
+      position: absolute;
+      top: 10%;
+      left: 20%;
+      width: 60%;
+      height: 70%;
+      border: 2px dashed rgba(59, 130, 246, 0.8);
+      border-radius: 50%;
+      pointer-events: none;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-800 flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center">
+    <h1 class="text-xl font-bold">Form Photo Fixer (Project 2)</h1>
+    <span class="text-xs bg-indigo-800 px-3 py-1 rounded-full">100% Offline & Private</span>
+  </header>
+
+  <main class="flex-1 max-w-5xl w-full mx-auto p-6 flex flex-col md:flex-row gap-6">
+    
+    <!-- Sidebar: Controls & Presets -->
+    <aside class="w-full md:w-80 bg-white p-5 rounded-xl shadow flex flex-col gap-5">
+      
+      <!-- Upload Section -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">1. Upload Image</label>
+        <input type="file" id="imageInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
+      </div>
+
+      <!-- Form Presets -->
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">2. Form Presets</label>
+        <select id="presetSelect" class="w-full border p-2 rounded text-sm bg-gray-50">
+          <option value="examA">Exam Form A (3.5 × 4.5 cm | Max 50 KB)</option>
+          <option value="jobB">Job Portal B (2.0 × 2.5 cm | Max 30 KB)</option>
+          <option value="passportC">Passport Size C (4.5 × 4.5 cm | Max 100 KB)</option>
+          <option value="custom">Custom Preset...</option>
+        </select>
+      </div>
+
+      <!-- Custom Preset Inputs -->
+      <div id="customPresetContainer" class="hidden flex-col gap-2 p-3 bg-gray-50 border rounded text-xs">
+        <span class="font-bold text-gray-600">Add Custom Preset</span>
+        <div class="flex gap-2">
+          <input type="number" id="customWidth" placeholder="Width (px)" class="w-1/2 p-1 border rounded" value="350"/>
+          <input type="number" id="customHeight" placeholder="Height (px)" class="w-1/2 p-1 border rounded" value="450"/>
+        </div>
+        <input type="number" id="customKb" placeholder="Max KB Limit" class="w-full p-1 border rounded" value="50"/>
+      </div>
+
+      <!-- Compression & Output Status -->
+      <div class="border-t pt-4">
+        <label class="block text-xs font-bold text-gray-500 mb-1">Target Limits</label>
+        <div class="text-xs text-gray-600 bg-indigo-50 p-3 rounded-lg border border-indigo-100 flex flex-col gap-1">
+          <p>Dimensions: <span id="targetDims" class="font-bold">350 x 450 px</span></p>
+          <p>Max Allowed Size: <span id="targetKb" class="font-bold">50 KB</span></p>
+          <p class="mt-1 text-emerald-700 font-bold hidden" id="statusReady">✓ Ready to upload[cite: 4]</p>
+          <p class="text-xs text-gray-500 mt-1" id="fileStats">Processed Size: --</p>
+        </div>
+      </div>
+
+      <!-- Action Button -->
+      <button id="processBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow transition">
+        Process & Compress[cite: 4]
+      </button>
+
+      <!-- Download Link -->
+      <a id="downloadBtn" class="hidden text-center w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg shadow transition">
+        Download Finished File[cite: 4]
+      </a>
+    </aside>
+
+    <!-- Workspace: Cropper Container -->
+    <section class="flex-1 bg-white p-5 rounded-xl shadow flex flex-col items-center justify-center">
+      <div id="placeholderText" class="text-gray-400 text-sm text-center">
+        Upload a photo or signature to start cropping with the face guide overlay[cite: 4].
+      </div>
+      <div class="w-full h-full max-h-[500px] hidden" id="cropperWrapper">
+        <img id="cropperImage" src="" class="max-w-full max-h-full block"/>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    let cropper = null;
+
+    const presetConfigs = {
+      examA: { width: 350, height: 450, maxKb: 50 },
+      jobB: { width: 200, height: 250, maxKb: 30 },
+      passportC: { width: 450, height: 450, maxKb: 100 }
+    };
+
+    const imageInput = document.getElementById('imageInput');
+    const cropperImage = document.getElementById('cropperImage');
+    const cropperWrapper = document.getElementById('cropperWrapper');
+    const placeholderText = document.getElementById('placeholderText');
+    const presetSelect = document.getElementById('presetSelect');
+    const customPresetContainer = document.getElementById('customPresetContainer');
+    
+    const targetDims = document.getElementById('targetDims');
+    const targetKb = document.getElementById('targetKb');
+    const processBtn = document.getElementById('processBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const fileStats = document.getElementById('fileStats');
+    const statusReady = document.getElementById('statusReady');
+
+    // Get current preset settings
+    function getActivePreset() {
+      const key = presetSelect.value;
+      if (key === 'custom') {
+        return {
+          width: parseInt(document.getElementById('customWidth').value) || 350,
+          height: parseInt(document.getElementById('customHeight').value) || 450,
+          maxKb: parseInt(document.getElementById('customKb').value) || 50
+        };
+      }
+      return presetConfigs[key];
+    }
+
+    // Update preset labels
+    function updatePresetUI() {
+      const preset = getActivePreset();
+      targetDims.textContent = `${preset.width} x ${preset.height} px`;
+      targetKb.textContent = `${preset.maxKb} KB`;
+
+      if (cropper) {
+        cropper.setAspectRatio(preset.width / preset.height);
+      }
+    }
+
+    presetSelect.addEventListener('change', () => {
+      if (presetSelect.value === 'custom') {
+        customPresetContainer.classList.remove('hidden');
+        customPresetContainer.classList.add('flex');
+      } else {
+        customPresetContainer.classList.add('hidden');
+        customPresetContainer.classList.remove('flex');
+      }
+      updatePresetUI();
+    });
+
+    ['customWidth', 'customHeight', 'customKb'].forEach(id => {
+      document.getElementById(id).addEventListener('input', updatePresetUI);
+    });
+
+    // 1. Handle File Upload & Initialize Cropper with Face Guide
+    imageInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        cropperImage.src = event.target.result;
+        placeholderText.classList.add('hidden');
+        cropperWrapper.classList.remove('hidden');
+
+        if (cropper) {
+          cropper.destroy();
+        }
+
+        const preset = getActivePreset();
+        cropper = new Cropper(cropperImage, {
+          aspectRatio: preset.width / preset.height,
+          viewMode: 1,
+          autoCropArea: 0.8,
+          background: false
+        });
+
+        downloadBtn.classList.add('hidden');
+        statusReady.classList.add('hidden');
+        fileStats.textContent = "Processed Size: --";
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // 2. Compress image iteratively step-by-step under the KB limit[cite: 5]
+    processBtn.addEventListener('click', () => {
+      if (!cropper) return alert('Please upload an image first.');
+
+      const preset = getActivePreset();
+      const canvas = cropper.getCroppedCanvas({
+        width: preset.width,
+        height: preset.height
+      });
+
+      let quality = 0.95;
+      let dataUrl = canvas.toDataURL('image/jpeg', quality);
+      let sizeKb = (dataUrl.length * (3 / 4)) / 1024;
+
+      // Iteratively reduce quality until under the target KB limit[cite: 5]
+      while (sizeKb > preset.maxKb && quality > 0.05) {
+        quality -= 0.05;
+        dataUrl = canvas.toDataURL('image/jpeg', quality);
+        sizeKb = (dataUrl.length * (3 / 4)) / 1024;
+      }
+
+      const finalKb = sizeKb.toFixed(1);
+      fileStats.textContent = `Processed Size: ${finalKb} KB (Quality: ${(quality * 100).toFixed(0)}%)`;
+
+      if (sizeKb <= preset.maxKb) {
+        statusReady.classList.remove('hidden');
+        downloadBtn.href = dataUrl;
+        downloadBtn.download = `form_photo_${preset.width}x${preset.height}.jpg`;
+        downloadBtn.classList.remove('hidden');
+      } else {
+        alert(`Warning: Unable to compress under ${preset.maxKb} KB even at lowest quality. Try reducing dimensions.`);
+      }
+    });
+  </script>
+</body>
+</html>
